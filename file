@@ -1,0 +1,255 @@
+(function () {
+    const d = document;
+    const b = d.body;
+
+    if (!b) {
+        alert('Open a real webpage first!');
+        return;
+    }
+
+    // Add styles for the core animation
+    const style = d.createElement('style');
+    style.innerHTML = '@keyframes pulse{0%{opacity:0.3;}50%{opacity:0.6;}100%{opacity:0.3;}}';
+    d.head.appendChild(style);
+
+    // Create the UI Box
+    const box = d.createElement('div');
+    box.style.cssText = 'position:fixed;top:15px;right:15px;background:rgba(2,10,25,0.9);color:#0cf;padding:10px 16px;z-index:999999;font-family:monospace;font-size:11px;border:2px solid #0cf;border-radius:6px;pointer-events:none;box-shadow:0 0 20px rgba(0,204,255,0.5);letter-spacing:1px;text-align:right;';
+
+    function updateUI(fuel, jetpackEquipped, gravityDir) {
+        const dirNames = ['DOWN', 'LEFT', 'UP', 'RIGHT'];
+        box.innerHTML = '<span style="font-weight:bold;color:#fff;text-shadow:0 0 5px #0cf;">NEO_CORE.SHX</span><br>' +
+            'WASD / ARROWS : MOVE<br>' +
+            'E : TOGGLE JETPACK (' + (jetpackEquipped ? '<span style="color:#0f0;">ON</span>' : '<span style="color:#f50;">OFF</span>') + ')<br>' +
+            'T : ROTATE GRAVITY (<span style="color:#bf00ff;">' + dirNames[gravityDir] + '</span>)<br>' +
+            'S / DOWN : DROP THROUGH PLATFORM<br>' +
+            'R : REBOOT SYSTEM<br>' +
+            '<span style="color:' + (fuel > 20 ? '#0cf' : '#f05') + ';">FUEL: ' + Math.round(fuel) + '%</span>';
+    }
+
+    updateUI(100, false, 0);
+    b.appendChild(box);
+
+    // Create Player Character
+    const p = d.createElement('div');
+    p.style.cssText = 'position:fixed;width:16px;height:28px;background:linear-gradient(135deg,#fff,#0cf,#05f);box-shadow:0 0 25px #0cf,0 0 8px #0cf inset;top:20px;left:50px;z-index:999998;border-radius:8px;pointer-events:none;transition:transform 0.05s ease,left 0s,top 0s;transform-origin:center center;';
+
+    const core = d.createElement('div');
+    core.style.cssText = 'position:absolute;top:4px;left:4px;width:8px;height:8px;background:#fff;border-radius:50%;box-shadow:0 0 10px #fff;animation:pulse 0.5s infinite;';
+    p.appendChild(core);
+    b.appendChild(p);
+
+    // Game Variables
+    let x = 50, y = 20, vx = 0, vy = 0, og = false, w = 16, h = 28, sx = 1, sy = 1, tilt = 0, dropTimer = 0, fuel = 100, isThrusting = false, jetpackEquipped = false;
+    let gravityDir = 0; // 0 = Down, 1 = Left, 2 = Up, 3 = Right
+    const keys = {};
+
+    window.onbeforeunload = function () {
+        b.style.transform = '';
+        b.style.transition = '';
+    };
+
+    // Particle Effects Engine
+    function fx(tx, ty, type) {
+        const count = type === 'land' ? 12 : (type === 'jetpack' ? 2 : 4);
+        for (let i = 0; i < count; i++) {
+            const s = d.createElement('div');
+            let ang, spd;
+
+            if (type === 'jetpack') {
+                // Jetpack particles always shoot opposite to current gravity
+                const baseAng = [Math.PI / 2, 0, -Math.PI / 2, Math.PI][gravityDir];
+                ang = baseAng + (Math.random() * 0.6 - 0.3);
+                spd = Math.random() * 4 + 2;
+            } else {
+                ang = type === 'land' ? (Math.PI + (Math.random() * Math.PI)) : (Math.random() * Math.PI * 2);
+                spd = type === 'land' ? (Math.random() * 5 + 2) : (Math.random() * 3 + 1);
+            }
+
+            const svx = Math.cos(ang) * spd;
+            let svy = Math.sin(ang) * spd;
+
+            s.style.cssText = `position:fixed;left:${tx + 8}px;top:${ty + 14}px;width:${type === 'jetpack' ? '3px' : '4px'};height:${type === 'jetpack' ? '6px' : '3px'};background:${type === 'jetpack' ? '#f50' : '#0cf'};box-shadow:0 0 8px ${type === 'jetpack' ? '#f50' : '#0cf'};z-index:999997;border-radius:${type === 'land' ? '50%' : '0px'};pointer-events:none;`;
+            
+            b.appendChild(s);
+
+            let o = 1;
+            let px = parseFloat(s.style.left);
+            let py = parseFloat(s.style.top);
+
+            const iv = setInterval(() => {
+                o -= type === 'land' ? 0.05 : (type === 'jetpack' ? 0.1 : 0.08);
+                if (o <= 0) {
+                    s.remove();
+                    clearInterval(iv);
+                } else {
+                    s.style.opacity = o;
+                    px += svx;
+                    py += svy;
+                    
+                    // Particle gravity pull
+                    if (type === 'land') {
+                        if (gravityDir === 0) svy += 0.1;
+                        if (gravityDir === 1) svx -= 0.1;
+                        if (gravityDir === 2) svy -= 0.1;
+                        if (gravityDir === 3) svx += 0.1;
+                    }
+                    
+                    s.style.left = px + 'px';
+                    s.style.top = py + 'px';
+                }
+            }, 25);
+        }
+    }
+
+    // Input Listeners
+    window.addEventListener('keydown', e => {
+        const k = e.key.toLowerCase();
+        keys[k] = true;
+
+        if (k === 'e') {
+            jetpackEquipped = !jetpackEquipped;
+            if (jetpackEquipped) og = false;
+        }
+        
+        // Gravity Rotation Feature
+        if (k === 't') {
+            gravityDir = (gravityDir + 1) % 4;
+            og = false;
+            fx(x, y, 'jump');
+        }
+
+        // Jump Mechanics altered by gravity direction
+        if ((k === 'w' || k === 'arrowup' || k === ' ') && og) {
+            if (gravityDir === 0) vy = -10;
+            if (gravityDir === 1) vx = 10;
+            if (gravityDir === 2) vy = 10;
+            if (gravityDir === 3) vx = -10;
+            
+            og = false;
+            sx = 0.7;
+            sy = 1.4;
+            fx(x, y, 'jump');
+            e.preventDefault();
+        }
+        
+        // Drop mechanics altered by gravity direction
+        if ((k === 's' || k === 'arrowdown') && og) {
+            dropTimer = 8;
+            og = false;
+            if (gravityDir === 0) y += 5;
+            if (gravityDir === 1) x -= 5;
+            if (gravityDir === 2) y -= 5;
+            if (gravityDir === 3) x += 5;
+        }
+        
+        if (k === 'r') {
+            x = 50;
+            y = 20;
+            vx = 0;
+            vy = 0;
+            fuel = 100;
+            gravityDir = 0;
+            jetpackEquipped = false;
+        }
+    });
+
+    window.addEventListener('keyup', e => {
+        keys[e.key.toLowerCase()] = false;
+    });
+
+    // Main Game Loop
+    setInterval(() => {
+        // Read directional controls relative to screenspace
+        const moveLeft = keys['a'] || keys['arrowleft'];
+        const moveRight = keys['d'] || keys['arrowright'];
+        const moveUp = keys['w'] || keys['arrowup'] || keys[' '];
+
+        // Horizontal axis movement relative to current gravity vector
+        if (gravityDir === 0 || gravityDir === 2) {
+            const sideDir = gravityDir === 0 ? 1 : -1;
+            if (moveLeft) {
+                vx = -5.5 * sideDir;
+                tilt += ((-6 * sideDir) - tilt) * 0.2;
+                if (og && Math.random() > 0.3) fx(x, y, 'trail');
+            } else if (moveRight) {
+                vx = 5.5 * sideDir;
+                tilt += ((6 * sideDir) - tilt) * 0.2;
+                if (og && Math.random() > 0.3) fx(x, y, 'trail');
+            } else {
+                vx *= 0.72;
+                tilt += (0 - tilt) * 0.15;
+            }
+        } else { // gravityDir is 1 (Left) or 3 (Right)
+            const sideDir = gravityDir === 1 ? 1 : -1;
+            if (moveLeft) { // relative up in screen coordinates
+                vy = -5.5 * sideDir;
+                tilt += ((-6 * sideDir) - tilt) * 0.2;
+                if (og && Math.random() > 0.3) fx(x, y, 'trail');
+            } else if (moveRight) { // relative down in screen coordinates
+                vy = 5.5 * sideDir;
+                tilt += ((6 * sideDir) - tilt) * 0.2;
+                if (og && Math.random() > 0.3) fx(x, y, 'trail');
+            } else {
+                vy *= 0.72;
+                tilt += (0 - tilt) * 0.15;
+            }
+        }
+
+        // Thrust Mechanics handling gravity directions
+        isThrusting = false;
+        const wantsThrust = jetpackEquipped || (moveUp && !og);
+        
+        if (wantsThrust && fuel > 0) {
+            if (gravityDir === 0) vy = -6.5;
+            if (gravityDir === 1) vx = 6.5;
+            if (gravityDir === 2) vy = 6.5;
+            if (gravityDir === 3) vx = -6.5;
+            
+            fuel -= 1.5;
+            isThrusting = true;
+            sx = 0.8;
+            sy = 1.2;
+            if (Math.random() > 0.2) fx(x, y, 'jetpack');
+        }
+
+        if (fuel <= 0) {
+            jetpackEquipped = false;
+        }
+
+        // Apply constant gravity vector forces
+        if (gravityDir === 0) vy += 0.65;
+        if (gravityDir === 1) vx -= 0.65;
+        if (gravityDir === 2) vy -= 0.65;
+        if (gravityDir === 3) vx += 0.65;
+
+        x += vx;
+        y += vy;
+
+        if (dropTimer > 0) dropTimer--;
+
+        // Screen Boundaries & Death Reset (Triggered if thrown out of frame on active gravity axis)
+        if ((gravityDir === 0 && y > window.innerHeight) || 
+            (gravityDir === 1 && x < -w) || 
+            (gravityDir === 2 && y < -h) || 
+            (gravityDir === 3 && x > window.innerWidth)) {
+            x = 50;
+            y = 20;
+            vx = 0;
+            vy = 0;
+            fuel = 100;
+            gravityDir = 0;
+            jetpackEquipped = false;
+            fx(x, y, 'land');
+        }
+
+        // Contain character positions within horizontal frame relative to standard bounds
+        if (x < 0) x = 0;
+        if (x > window.innerWidth - w) x = window.innerWidth - w;
+        if (y < 0) y = 0;
+        if (y > window.innerHeight - h) y = window.innerHeight - h;
+
+        // Platform Collision Detection
+        let hit = false;
+        if (dropTimer === 0) {
+            const el = d.querySelectorAll('p,span,a,h1,h2,h3,button,img,li,th,td');
